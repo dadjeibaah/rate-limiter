@@ -13,7 +13,7 @@ class RateLimitFilterTest extends FunSuite {
   }
 
   test("can initialize filter") {
-    val limiter = new RateLimitFilter[Request, Response](0, 0)
+    val limiter = new RateLimitFilter(1, 1)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
         Future.value(Response(Status.Ok))
@@ -25,7 +25,7 @@ class RateLimitFilterTest extends FunSuite {
   }
 
   test("allow requests to reach service when below rate limit") {
-    val limiter = new RateLimitFilter[Request, Response](100, 1)
+    val limiter = new RateLimitFilter(100, 1)
     @volatile var totalallowedReqs = 0
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
@@ -44,7 +44,7 @@ class RateLimitFilterTest extends FunSuite {
   }
 
   test("block requests from reaching service when above rate limit") {
-    val limiter = new RateLimitFilter[Request, Response](100, 1)
+    val limiter = new RateLimitFilter(10, 1)
     @volatile var totalallowedReqs = 0
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
@@ -54,11 +54,11 @@ class RateLimitFilterTest extends FunSuite {
     }
 
     Time.withCurrentTimeFrozen { tc =>
-      for (_ <- 1 to 120) {
+      for (_ <- 1 to 12) {
         svc(Request())
       }
       tc.advance(1.second)
-      assert(totalallowedReqs == 100)
+      assert(totalallowedReqs == 10)
     }
   }
 }

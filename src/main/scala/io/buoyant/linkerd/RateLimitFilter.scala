@@ -1,37 +1,35 @@
 package io.buoyant.linkerd
 
 import com.twitter.finagle.{Service, SimpleFilter}
-import com.twitter.util.{Duration, Future, Stopwatch, Time}
+import com.twitter.finagle.http.{Request, Response, Status}
+import com.twitter.util.{Duration, Future, Time}
 import scala.collection.mutable
 
-class RateLimitFilter[Req, Rep](
-  limitExceededResponse: => Rep,
+class RateLimitFilter(
   limit: Int,
-  window: Duration
-) extends SimpleFilter[Req, Rep] {
+  window: Int
+) extends SimpleFilter[Request, Response] {
 
-  private[this] val RequestRateCounter = mutable.SortedMap[(Req, Time), Int]()
+  private[this] val RequestRateCounter = mutable.SortedMap[Time, Int]()
 
   override def apply(
-    request: Req,
-    service: Service[Req, Rep]
-  ): Future[Rep] = {
+    request: Request,
+    service: Service[Request, Response]
+  ): Future[Response] = {
     val now = Time.now
 
     val validReqs = RequestRateCounter.collect {
-      case ((req, time), count) if time < now.minus(window) => count
+      case (t, c) if t >= now.minus(Duration.fromSeconds(window)) => c
     }
 
-    if (validReqs.sum > limit)
-      Future.value(limitExceededResponse)
+    if (validReqs.sum >= limit)
+      Future.value(Response(Status.TooManyRequests))
     else {
-     RequestRateCounter.get((request, now)) match {
-       case Some(c) => RequestRateCounter.update((request, now), c+1)
-       case None => RequestRateCounter.update((request, now), 1)
+     RequestRateCounter.get(now) match {
+       case Some(c) => RequestRateCounter.update(now, c+1)
+       case None => RequestRateCounter.update(now, 1)
      }
+      service(request)
     }
-    service(request)
-
   }
-
 }
