@@ -19,7 +19,7 @@ class RateLimitFilter(
     val now = Time.now
 
     val validReqs = RequestRateCounter.collect {
-      case (t, c) if t >= now.minus(Duration.fromSeconds(window)) => c
+      case (t, c) if t > now.minus(Duration.fromSeconds(window)) => c
     }
 
     if (validReqs.sum >= limit)
