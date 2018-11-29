@@ -2,13 +2,14 @@ package io.buoyant.linkerd
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.twitter.finagle._
-import com.twitter.finagle.http.{Request, Response, Status}
+import com.twitter.util.Timer
 import io.buoyant.linkerd.protocol.HttpRequestAuthorizerConfig
 
 
 case class RateLimitConfig(
   limit: Int,
-  windowSecs: Int
+  window: Int,
+  timer: Timer
 )
   extends HttpRequestAuthorizerConfig {
 
@@ -24,7 +25,8 @@ case class RateLimitConfig(
   @JsonIgnore
   override def mk(params: Stack.Params) = new RateLimitFilter(
     limit,
-    windowSecs
+    window,
+    timer
   )
 }
 

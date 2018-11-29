@@ -1,129 +1,145 @@
 package io.buoyant.linkerd
 
+import com.twitter.conversions.time._
 import com.twitter.finagle.Service
 import com.twitter.finagle.http.{Request, Response, Status}
-import com.twitter.util.{Await, Future, Time}
+import com.twitter.util._
 import org.scalatest.FunSuite
-import com.twitter.conversions.time._
 
 class RateLimitFilterTest extends FunSuite {
+  val limit = 100
+  val window = 1
+  val period = window.toFloat / limit
 
-  def mkService(counter: Int) = Service.mk[Request, Response] { _ =>
-    Future.value(Response(Status.Ok))
-  }
+  test("initialize filter and accept one request") {
+    @volatile var allowedRequests = 0
 
-  test("can initialize filter") {
-    val limiter = new RateLimitFilter(1, 1)
+    val timer = new MockTimer
+    val limiter = new RateLimitFilter(limit, window, timer)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
+        allowedRequests = allowedRequests + 1
         Future.value(Response(Status.Ok))
       }
     }
 
-    val rep = Await.result(svc(Request()))
-    assert(rep.status == Status.Ok)
+    svc(Request())
+    assert(allowedRequests == 1)
   }
 
-  test("allow requests to reach service when below rate limit") {
-    val limiter = new RateLimitFilter(100, 1)
-    @volatile var totalallowedReqs = 0
+  test("accept all requests while under limit") {
+    @volatile var allowedRequests = 0
+
+    val timer = new MockTimer
+    val limiter = new RateLimitFilter(limit, window, timer)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
-        totalallowedReqs = totalallowedReqs + 1
-        Future.value(Response(Status.Ok))
-      }
-    }
-
-    Time.withCurrentTimeFrozen { tc =>
-      for (_ <- 1 to 10) {
-        svc(Request())
-      }
-      tc.advance(1.second)
-      assert(totalallowedReqs == 10)
-    }
-  }
-
-  test("block requests from reaching service when above rate limit") {
-    val limiter = new RateLimitFilter(10, 1)
-    @volatile var totalallowedReqs = 0
-    val svc = limiter.andThen {
-      Service.mk[Request, Response] { _ =>
-        totalallowedReqs = totalallowedReqs + 1
+        allowedRequests = allowedRequests + 1
         Future.value(Response(Status.Ok))
       }
     }
 
     Time.withCurrentTimeFrozen { tc =>
-      for (_ <- 1 to 12) {
+      for (_ <- 1 until limit) {
         svc(Request())
       }
-      tc.advance(1.second)
-      assert(totalallowedReqs == 10)
     }
+
+    assert(allowedRequests == limit - 1)
   }
 
-  test("block requests from reaching service over time") {
-      val limiter = new RateLimitFilter(10, 1)
-      @volatile var totalallowedReqs = 0
-      val svc = limiter.andThen {
-        Service.mk[Request, Response] { _ =>
-          totalallowedReqs = totalallowedReqs + 1
-          Future.value(Response(Status.Ok))
-        }
-      }
+  test("accept all requests up to the limit") {
+    @volatile var allowedRequests = 0
 
-      Time.withCurrentTimeFrozen { tc =>
-        for (_ <- 1 to 12) {
-          svc(Request())
-        }
-        tc.advance(1.second)
-        assert(totalallowedReqs == 10)
-
-        for(_ <- 1 to 8) {
-          svc(Request())
-        }
-
-        tc.advance(1.second)
-        assert(totalallowedReqs == 18)
-
-        for(_ <- 1 to 2) {
-          svc(Request())
-        }
-        tc.advance(1.second)
-
-        for(_ <- 1 to 11){
-          svc(Request())
-        }
-        tc.advance(1.second)
-        assert(totalallowedReqs == 30)
-      }
-  }
-
-  test("don't allow rate limit to exceed during window boundary transition") {
-    val limiter = new RateLimitFilter(10, 1)
-    @volatile var totalallowedReqs = 0
+    val timer = new MockTimer
+    val limiter = new RateLimitFilter(limit, window, timer)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
-        totalallowedReqs = totalallowedReqs + 1
+        allowedRequests = allowedRequests + 1
         Future.value(Response(Status.Ok))
       }
     }
 
     Time.withCurrentTimeFrozen { tc =>
-      tc.advance(9999.millisecond)
-
-      for(_ <- 1 to 10) {
+      for (_ <- 1 to limit) {
         svc(Request())
       }
-
-      tc.advance(1.millisecond)
-
-      for(_ <- 1 to 10) {
-        svc(Request())
-      }
-      tc.advance(1.millisecond)
-
-      assert(totalallowedReqs == 10)
     }
+
+    assert(allowedRequests == limit)
+  }
+
+  test("reject requests after reaching the limit") {
+    @volatile var allowedRequests = 0
+
+    val timer = new MockTimer
+    val limiter = new RateLimitFilter(limit, window, timer)
+    val svc = limiter.andThen {
+      Service.mk[Request, Response] { _ =>
+        allowedRequests = allowedRequests + 1
+        Future.value(Response(Status.Ok))
+      }
+    }
+
+    Time.withCurrentTimeFrozen { tc =>
+      for (_ <- 1 to limit + 1) {
+        svc(Request())
+      }
+    }
+
+    assert(allowedRequests == limit)
+  }
+
+  test("accept one request after reaching the limit and advancing one period") {
+    @volatile var allowedRequests = 0
+
+    val timer = new MockTimer
+    val limiter = new RateLimitFilter(limit, window, timer)
+    val svc = limiter.andThen {
+      Service.mk[Request, Response] { _ =>
+        allowedRequests = allowedRequests + 1
+        Future.value(Response(Status.Ok))
+      }
+    }
+
+    Time.withCurrentTimeFrozen { tc =>
+      for (_ <- 1 to limit) {
+        svc(Request())
+      }
+
+      tc.advance(Duration.fromFractionalSeconds(period))
+      timer.tick()
+
+      svc(Request())
+    }
+
+    assert(allowedRequests == 101)
+  }
+
+  test("accept all requests after reaching the limit and receiving one request per period for the full window") {
+    @volatile var allowedRequests = 0
+
+    val timer = new MockTimer
+    val limiter = new RateLimitFilter(limit, window, timer)
+    val svc = limiter.andThen {
+      Service.mk[Request, Response] { _ =>
+        allowedRequests = allowedRequests + 1
+        Future.value(Response(Status.Ok))
+      }
+    }
+
+    Time.withCurrentTimeFrozen { tc =>
+      for (_ <- 1 to limit) {
+        svc(Request())
+      }
+
+      for (_ <- 1 to limit) {
+        tc.advance(Duration.fromFractionalSeconds(period))
+        timer.tick()
+        svc(Request())
+      }
+    }
+
+    assert(allowedRequests == limit * 2)
   }
 }

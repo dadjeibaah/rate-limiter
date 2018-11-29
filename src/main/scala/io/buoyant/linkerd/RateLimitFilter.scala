@@ -1,34 +1,31 @@
 package io.buoyant.linkerd
 
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.function.IntUnaryOperator
+
 import com.twitter.finagle.{Service, SimpleFilter}
 import com.twitter.finagle.http.{Request, Response, Status}
-import com.twitter.util.{Duration, Future, Time}
-import scala.collection.mutable
+import com.twitter.util.{Duration, Future, Timer}
 
 class RateLimitFilter(
   limit: Int,
-  window: Int
+  window: Int,
+  timer: Timer
 ) extends SimpleFilter[Request, Response] {
 
-  private[this] val RequestRateCounter = mutable.SortedMap[Time, Int]()
+  private[this] val count = new AtomicInteger()
+  private[this] val decrementToZero: IntUnaryOperator = i => if (i > 0) i - 1 else i
+  private[this] val period = window.toFloat / limit
+
+  timer.schedule(Duration.fromFractionalSeconds(period))(count.getAndUpdate(decrementToZero))
 
   override def apply(
     request: Request,
     service: Service[Request, Response]
   ): Future[Response] = {
-    val now = Time.now
-
-    val validReqs = RequestRateCounter.collect {
-      case (t, c) if t > now.minus(Duration.fromSeconds(window)) => c
-    }
-
-    if (validReqs.sum >= limit)
-      Future.value(Response(Status.TooManyRequests))
+    if (count.get() >= limit) Future.value(Response(Status.TooManyRequests))
     else {
-     RequestRateCounter.get(now) match {
-       case Some(c) => RequestRateCounter.update(now, c+1)
-       case None => RequestRateCounter.update(now, 1)
-     }
+      count.getAndIncrement()
       service(request)
     }
   }
