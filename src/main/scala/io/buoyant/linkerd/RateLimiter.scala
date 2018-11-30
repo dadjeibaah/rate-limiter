@@ -7,10 +7,10 @@ import com.twitter.finagle.{Service, SimpleFilter}
 import com.twitter.finagle.http.{Request, Response, Status}
 import com.twitter.util.{Duration, Future, Timer}
 
-class RateLimitFilter(
+class RateLimiter(
   limit: Int,
-  window: Int,
-  timer: Timer
+  timer: Timer,
+  window: Int
 ) extends SimpleFilter[Request, Response] {
 
   private[this] val count = new AtomicInteger()

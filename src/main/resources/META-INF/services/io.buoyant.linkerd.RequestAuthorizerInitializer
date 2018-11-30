@@ -1,1 +1,1 @@
-io.buoyant.linkerd.RateLimitInitializer
+io.buoyant.linkerd.RateLimiterInitializer
