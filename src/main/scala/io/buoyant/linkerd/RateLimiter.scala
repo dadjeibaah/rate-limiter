@@ -7,15 +7,10 @@ import com.twitter.finagle.{Service, SimpleFilter}
 import com.twitter.finagle.http.{Request, Response, Status}
 import com.twitter.util.{Duration, Future, Timer}
 
-class RateLimiter(
-  limit: Int,
-  timer: Timer,
-  window: Int
-) extends SimpleFilter[Request, Response] {
-
+class RateLimiter(limit: Int, timer: Timer, intervalSeconds: Int) extends SimpleFilter[Request, Response] {
   private[this] val count = new AtomicInteger()
   private[this] val decrementToZero: IntUnaryOperator = i => if (i > 0) i - 1 else i
-  private[this] val period = window.toFloat / limit
+  private[this] val period = intervalSeconds.toFloat / limit
 
   timer.schedule(Duration.fromFractionalSeconds(period))(count.getAndUpdate(decrementToZero))
 

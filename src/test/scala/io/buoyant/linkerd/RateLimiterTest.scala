@@ -1,6 +1,5 @@
 package io.buoyant.linkerd
 
-import com.twitter.conversions.time._
 import com.twitter.finagle.Service
 import com.twitter.finagle.http.{Request, Response, Status}
 import com.twitter.util._
@@ -8,30 +7,35 @@ import org.scalatest.FunSuite
 
 class RateLimiterTest extends FunSuite {
   val limit = 100
-  val window = 1
-  val period = window.toFloat / limit
+  val invalidLimit: Int = -1
 
-  test("initialize filter and accept one request") {
-    @volatile var allowedRequests = 0
+  val intervalSeconds = 1
+  val invalidIntervalSeconds: Int = -1
 
-    val timer = new MockTimer
-    val limiter = new RateLimiter(limit, timer, window)
-    val svc = limiter.andThen {
-      Service.mk[Request, Response] { _ =>
-        allowedRequests = allowedRequests + 1
-        Future.value(Response(Status.Ok))
-      }
+  val period: Float = intervalSeconds.toFloat / limit
+
+  test("initialize filter config with invalid request limit and fail") {
+    assertThrows[IllegalArgumentException] {
+      val _ = new RateLimiterConfig(invalidLimit, intervalSeconds)
     }
+  }
 
-    svc(Request())
-    assert(allowedRequests == 1)
+  test("initialize filter config with invalid interval and fail") {
+    assertThrows[IllegalArgumentException] {
+      val _ = new RateLimiterConfig(limit, invalidIntervalSeconds)
+    }
+  }
+
+  test("initialize filter config with default interval") {
+    val limiterConfig = new RateLimiterConfig(limit)
+    assert(limiterConfig.isInstanceOf[RateLimiterConfig])
   }
 
   test("accept all requests while under limit") {
     @volatile var allowedRequests = 0
 
     val timer = new MockTimer
-    val limiter = new RateLimiter(limit, timer, window)
+    val limiter = new RateLimiter(limit, timer, intervalSeconds)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
         allowedRequests = allowedRequests + 1
@@ -52,7 +56,7 @@ class RateLimiterTest extends FunSuite {
     @volatile var allowedRequests = 0
 
     val timer = new MockTimer
-    val limiter = new RateLimiter(limit, timer, window)
+    val limiter = new RateLimiter(limit, timer, intervalSeconds)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
         allowedRequests = allowedRequests + 1
@@ -73,7 +77,7 @@ class RateLimiterTest extends FunSuite {
     @volatile var allowedRequests = 0
 
     val timer = new MockTimer
-    val limiter = new RateLimiter(limit, timer, window)
+    val limiter = new RateLimiter(limit, timer, intervalSeconds)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
         allowedRequests = allowedRequests + 1
@@ -94,7 +98,7 @@ class RateLimiterTest extends FunSuite {
     @volatile var allowedRequests = 0
 
     val timer = new MockTimer
-    val limiter = new RateLimiter(limit, timer, window)
+    val limiter = new RateLimiter(limit, timer, intervalSeconds)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
         allowedRequests = allowedRequests + 1
@@ -116,11 +120,11 @@ class RateLimiterTest extends FunSuite {
     assert(allowedRequests == limit + 1)
   }
 
-  test("accept all requests after reaching the limit and receiving one request per period for the full window") {
+  test("accept all requests after reaching the limit and receiving one request per period for the full intervalSeconds") {
     @volatile var allowedRequests = 0
 
     val timer = new MockTimer
-    val limiter = new RateLimiter(limit, timer, window)
+    val limiter = new RateLimiter(limit, timer, intervalSeconds)
     val svc = limiter.andThen {
       Service.mk[Request, Response] { _ =>
         allowedRequests = allowedRequests + 1

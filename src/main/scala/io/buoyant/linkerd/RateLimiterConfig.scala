@@ -6,7 +6,10 @@ import com.twitter.finagle.util.DefaultTimer
 import com.twitter.finagle.{Filter, Stack}
 import io.buoyant.linkerd.protocol.HttpRequestAuthorizerConfig
 
-class RateLimiterConfig(limit: Int, window: Int) extends HttpRequestAuthorizerConfig{
+class RateLimiterConfig(limit: Int, intervalSeconds: Int = 1) extends HttpRequestAuthorizerConfig{
+  require(limit > 0, "The request limit must be greater than 0 requests.")
+  require(intervalSeconds > 0, "The interval must be greater than 0 seconds.")
+
   @JsonIgnore
   override def role: Stack.Role = Stack.Role("HttpRateLimiter")
 
@@ -18,6 +21,6 @@ class RateLimiterConfig(limit: Int, window: Int) extends HttpRequestAuthorizerCo
 
   @JsonIgnore
   override def mk(params: Stack.Params): Filter[Request, Response, Request, Response] = {
-    new RateLimiter(limit, DefaultTimer, window)
+    new RateLimiter(limit, DefaultTimer, intervalSeconds)
   }
 }
