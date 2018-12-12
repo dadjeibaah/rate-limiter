@@ -1,2 +1,8 @@
+.ensime*
 .idea
-target
+.sbt-launch.jar
+
+ensime-langserver.log
+pc.stdout.log
+
+target/
